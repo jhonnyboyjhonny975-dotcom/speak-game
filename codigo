@@ -1,0 +1,79 @@
+import random
+from difflib import SequenceMatcher
+
+import scipy.io.wavfile as wav
+import sounddevice as sd
+import speech_recognition as sr
+from deep_translator import MyMemoryTranslator
+
+# palavra em português → tradução local (reserva se o tradutor online falhar)
+words_by_level = {
+    "fácil": {"gato": "cat", "cachorro": "dog", "maçã": "apple", "leite": "milk", "sol": "sun"},
+    "médio": {"casa": "house", "escola": "school", "amigo": "friend", "janela": "window", "amarelo": "yellow"},
+    "difícil": {"tecnologia": "technology", "universidade": "university", "informação": "information",
+                "pronúncia": "pronunciation", "imaginação": "imagination"},
+}
+points = {"fácil": 10, "médio": 20, "difícil": 30}
+threshold = {"fácil": 0.75, "médio": 0.8, "difícil": 0.85}  # rigor da comparação
+
+print("""
+ ╔═══════════════════════════════╗
+ ║  🎙️  SPEAK RIGHT  🗣️          ║
+ ║  Fale a tradução em inglês!   ║
+ ╚═══════════════════════════════╝
+ ❤️ 3 vidas | 🔥 acertos seguidos dão bônus | 🚪 digite 's' para sair
+""")
+niveis = list(words_by_level)
+for i, n in enumerate(niveis, 1):
+    print(f" {i} - {n} ({points[n]} pts)")
+escolha = input("👉 Escolha o nível: ")
+while not (escolha.isdigit() and 1 <= int(escolha) <= 3):
+    escolha = input("❌ Inválido! Escolha 1, 2 ou 3: ")
+nivel = niveis[int(escolha) - 1]
+
+palavras = list(words_by_level[nivel].items())
+random.shuffle(palavras)
+score, erros, combo = 0, 0, 0
+rec = sr.Recognizer()
+
+for pt, local in palavras:
+    if erros >= 3:
+        break
+    print(f"\n{'❤️ ' * (3 - erros)}{'🖤 ' * erros}| 💰 {score} pts | 🔥 x{combo}")
+    if input(f"🇧🇷 Diga em inglês: {pt.upper()}  (ENTER para gravar) ").lower() == "s":
+        break
+
+    try:  # tradução online, com reserva local
+        certa = MyMemoryTranslator(source="pt-BR", target="en-US").translate(pt).lower().strip(" .")
+    except Exception:
+        certa = local
+    aceitas = {certa, local}
+
+    print("🎙️ Fale agora (3s)...")
+    audio = sd.rec(3 * 16000, samplerate=16000, channels=1, dtype="int16")
+    sd.wait()
+    wav.write("output.wav", 16000, audio)
+    with sr.AudioFile("output.wav") as src:
+        gravado = rec.record(src)
+
+    try:
+        ouvido = rec.recognize_google(gravado, language="en-US").lower()
+    except (sr.UnknownValueError, sr.RequestError):
+        ouvido = ""
+
+    sim = max(SequenceMatcher(None, ouvido, a).ratio() for a in aceitas)
+    print(f"👂 Entendi: '{ouvido}' | 🌍 Esperado: '{certa}' | 📏 {sim:.0%} {'⭐' * round(sim * 5)}")
+
+    if sim >= threshold[nivel]:
+        combo += 1
+        ganho = points[nivel] + (combo - 1) * 5
+        score += ganho
+        print(f"✅ Acertou! +{ganho} pts")
+    else:
+        erros += 1
+        combo = 0
+        print("❌ Errou!")
+
+print("\n" + "═" * 30)
+print("💀 GAME OVER!" if erros >= 3 else "🏁 FIM DE JOGO!")
+print(f"💰 Pontuação final: {score} | ❌ Erros: {erros}")
